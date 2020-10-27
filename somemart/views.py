@@ -1,5 +1,3 @@
-import json
-
 from django.core.exceptions import ObjectDoesNotExist
 from django.http import JsonResponse
 from django.views import View
@@ -7,6 +5,9 @@ from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
 from marshmallow import Schema, fields, ValidationError
 from marshmallow.validate import Length, Range
+import json
+from django.contrib.auth import authenticate
+import base64
 from .models import Item, Review
 
 
@@ -29,19 +30,30 @@ class AddItemView(View):
     """View для создания товара."""
 
     def post(self, request):
-        try:
-            data = json.loads(request.body)
-            schema = ItemSchema(strict=True)
-            schema.validate(data=data)
-            new_item = Item.objects.create(title=data["title"], description=data["description"],
-                                           price=data["price"])
-            new_item.save()
-            resp = {"id": new_item.id}
-            return JsonResponse(resp, status=201)
-        except json.JSONDecodeError:
-            return JsonResponse({'error': 'Invalid JSON'}, status=400)
-        except ValidationError as e:
-            return JsonResponse({'error': e.messages}, status=400)
+        if 'HTTP_AUTHORIZATION' in request.META:
+            auth = request.META.get('HTTP_AUTHORIZATION').split()
+            if len(auth) == 2:
+                if auth[0] == 'Basic':
+                    name, passwd = base64.b64decode(auth[1]).decode('utf-8').split(sep=':')
+                    user = authenticate(username=name, password=passwd)
+                    if user:
+                        if user.is_staff:
+                            try:
+                                data = json.loads(request.body)
+                                schema = ItemSchema(strict=True)
+                                schema.validate(data=data)
+                                new_item = Item.objects.create(title=data["title"], description=data["description"],
+                                                               price=data["price"])
+                                new_item.save()
+                                resp = {"id": new_item.id}
+                                return JsonResponse(resp, status=201)
+                            except json.JSONDecodeError:
+                                return JsonResponse({'error': 'Invalid JSON'}, status=400)
+                            except ValidationError as e:
+                                return JsonResponse({'error': e.messages}, status=400)
+                        if not user.is_staff:
+                            return JsonResponse({}, status=403)
+        return JsonResponse({}, status=401)
 
 
 @method_decorator(csrf_exempt, name='dispatch')
